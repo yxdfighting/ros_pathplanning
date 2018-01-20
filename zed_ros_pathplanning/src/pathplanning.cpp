@@ -11,8 +11,10 @@
 #include <nav_msgs/Path.h>
 #include <geometry_msgs/PoseStamped.h>
 
+#include <ompl/base/spaces/SE2StateSpace.h>
+#include <ompl/base/spaces/SO2StateSpace.h>
 #include <ompl/base/spaces/SE3StateSpace.h>
-#include <ompl/base/spaces/SE3StateSpace.h>
+#include <ompl/base/spaces/SO3StateSpace.h>
 #include <ompl/base/OptimizationObjective.h>
 #include <ompl/base/objectives/PathLengthOptimizationObjective.h>
  #include <ompl/geometric/planners/rrt/RRTstar.h>
@@ -27,6 +29,8 @@
 #include "fcl/collision.h"
 #include "fcl/broadphase/broadphase.h"
 #include "fcl/math/transform.h"
+#include "tf/transform_datatypes.h"
+
 
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
@@ -46,11 +50,11 @@ geometry_msgs::PoseStamped pose_pub;
 class planner {
 public:
     //void setStart(double x, double y, double z,double x1,double y1,double z1,double w1)
-    void setStart(double x, double y, double z)
+    void setStart(double x, double y)
     {
-        ob::ScopedState<ob::SE3StateSpace> start(space);
-        start->setXYZ(x,y,z);
-        start->as<ob::SO3StateSpace::StateType>(1)->setIdentity();
+        ob::ScopedState<ob::SE2StateSpace> start(space);
+        start->setXY(x,y);
+        start->as<ob::SO2StateSpace::StateType>(1)->setIdentity();
         /*
         start->as<ob::SO3StateSpace::StateType>(1)->x = x1;
         start->as<ob::SO3StateSpace::StateType>(1)->y = y1;
@@ -61,11 +65,11 @@ public:
         pdef->addStartState(start);
     }
     //void setGoal(double x, double y, double z,double x1,double y1,double z1,double w1)
-    void setGoal(double x, double y, double z)
+    void setGoal(double x, double y)
     {
-        ob::ScopedState<ob::SE3StateSpace> goal(space);
-        goal->setXYZ(x,y,z);
-        goal->as<ob::SO3StateSpace::StateType>(1)->setIdentity();
+        ob::ScopedState<ob::SE2StateSpace> goal(space);
+        goal->setXY(x,y);
+        goal->as<ob::SO2StateSpace::StateType>(1)->setIdentity();
         /*
         goal->as<ob::SO3StateSpace::StateType>(1)->x = x1;
         goal->as<ob::SO3StateSpace::StateType>(1)->y = y1;
@@ -74,7 +78,7 @@ public:
         */
         pdef->clearGoal();
         pdef->setGoalState(goal);
-        std::cout << "goal set to: " << x << " " << y << " " << z << std::endl;
+        std::cout << "goal set to: " << x << " " << y << std::endl;
     }
     void updateMap(boost::shared_ptr<fcl::CollisionGeometry> map)
     {
@@ -89,43 +93,41 @@ public:
         fcl::OcTree* tree = new fcl::OcTree(boost::shared_ptr<const octomap::OcTree>(new octomap::OcTree(0.3)));
         tree_obj = boost::shared_ptr<fcl::CollisionGeometry>(tree);
         //解的状态空间
-        space = ob::StateSpacePtr(new ob::SE3StateSpace());
+        space = ob::StateSpacePtr(new ob::SE2StateSpace());
         // create a start state
-        ob::ScopedState<ob::SE3StateSpace> start(space);
+        ob::ScopedState<ob::SE2StateSpace> start(space);
        // create a goal state
-        ob::ScopedState<ob::SE3StateSpace> goal(space);
+        ob::ScopedState<ob::SE2StateSpace> goal(space);
         // set the bounds for the R^3 part of SE(3)
         // 搜索的三维范围设置
-        ob::RealVectorBounds bounds(3);
+        ob::RealVectorBounds bounds(2);
 
         bounds.setLow(0,-5);
         bounds.setHigh(0,5);
         bounds.setLow(1,-5);
         bounds.setHigh(1,5);
-        bounds.setLow(2,-1.5);
-        bounds.setHigh(2,1.5);
 
-        space->as<ob::SE3StateSpace>()->setBounds(bounds);
+        space->as<ob::SE2StateSpace>()->setBounds(bounds);
 
         // construct an instance of  space information from this state space
         si = ob::SpaceInformationPtr(new ob::SpaceInformation(space));
-        start->setXYZ(0,0,0);
+        start->setXY(0,0);
         /*
         start->as<ob::SO3StateSpace::StateType>(1)->x = 0;
         start->as<ob::SO3StateSpace::StateType>(1)->y = 0;
         start->as<ob::SO3StateSpace::StateType>(1)->z = 0;
         start->as<ob::SO3StateSpace::StateType>(1)->w = 1;
         */
-        start->as<ob::SO3StateSpace::StateType>(1)->setIdentity();
+        start->as<ob::SO2StateSpace::StateType>(1)->setIdentity();
         // start.random();
-        goal->setXYZ(0,0,0);
+        goal->setXY(0,0);
         /*
         goal->as<ob::SO3StateSpace::StateType>(1)->x = 0;
         goal->as<ob::SO3StateSpace::StateType>(1)->y = 0;
         goal->as<ob::SO3StateSpace::StateType>(1)->z = 0;
         goal->as<ob::SO3StateSpace::StateType>(1)->w = 1;
         */
-        goal->as<ob::SO3StateSpace::StateType>(1)->setIdentity();
+        goal->as<ob::SO2StateSpace::StateType>(1)->setIdentity();
         // goal.random();
       
         // set state validity checking for this space
@@ -202,21 +204,23 @@ public:
 
             for (std::size_t path_idx = 0; path_idx < pth->getStateCount (); path_idx++)
             {
-                const ob::SE3StateSpace::StateType *se3state = pth->getState(path_idx)->as<ob::SE3StateSpace::StateType>();
+                const ob::SE2StateSpace::StateType *se2state = pth->getState(path_idx)->as<ob::SE2StateSpace::StateType>();
                 // extract the first component of the state and cast it to what we expect
-                const ob::RealVectorStateSpace::StateType *pos = se3state->as<ob::RealVectorStateSpace::StateType>(0);
+                const ob::RealVectorStateSpace::StateType *pos = se2state->as<ob::RealVectorStateSpace::StateType>(0);
                 // extract the second component of the state and cast it to what we expect
-                const ob::SO3StateSpace::StateType *rot = se3state->as<ob::SO3StateSpace::StateType>(1);
+                const ob::SO2StateSpace::StateType *rot = se2state->as<ob::SO2StateSpace::StateType>(1);
                 geometry_msgs::PoseStamped pose;
 
                 pose.pose.position.x = pos->values[0];
                 pose.pose.position.y = pos->values[1];
-                pose.pose.position.z = pos->values[2];
+                pose.pose.position.z = 0;
+                
+                double my_yaw = rot->value;
 
-                pose.pose.orientation.x = rot->x;
-                pose.pose.orientation.y = rot->y;
-                pose.pose.orientation.z = rot->z;
-                pose.pose.orientation.w = rot->w;
+                pose.pose.orientation.x = tf::createQuaternionMsgFromRollPitchYaw(0,0,my_yaw).x;
+                pose.pose.orientation.y = tf::createQuaternionMsgFromRollPitchYaw(0,0,my_yaw).y;
+                pose.pose.orientation.z = tf::createQuaternionMsgFromRollPitchYaw(0,0,my_yaw).z;
+                pose.pose.orientation.w = tf::createQuaternionMsgFromRollPitchYaw(0,0,my_yaw).w;
 
                 msg_temp.poses.push_back(pose);
 
@@ -238,25 +242,27 @@ public:
             for (std::size_t idx = 0; idx < path_smooth->getStateCount (); idx++)
             {
                     // cast the abstract state type to the type we expect
-                const ob::SE3StateSpace::StateType *se3state = path_smooth->getState(idx)->as<ob::SE3StateSpace::StateType>();
+                const ob::SE2StateSpace::StateType *se2state = path_smooth->getState(idx)->as<ob::SE2StateSpace::StateType>();
 
                 // extract the first component of the state and cast it to what we expect
-                const ob::RealVectorStateSpace::StateType *pos = se3state->as<ob::RealVectorStateSpace::StateType>(0);
+                const ob::RealVectorStateSpace::StateType *pos = se2state->as<ob::RealVectorStateSpace::StateType>(0);
 
                 // extract the second component of the state and cast it to what we expect
-                const ob::SO3StateSpace::StateType *rot = se3state->as<ob::SO3StateSpace::StateType>(1);
+                const ob::SO2StateSpace::StateType *rot = se2state->as<ob::SO2StateSpace::StateType>(1);
                 
                 geometry_msgs::PoseStamped point;
 //              pose.header.frame_id = "/world"
 
                 point.pose.position.x = pos->values[0];
                 point.pose.position.y = pos->values[1];
-                point.pose.position.z = pos->values[2];
+                point.pose.position.z = 0;
 
-                point.pose.orientation.x = rot->x;
-                point.pose.orientation.y = rot->y;
-                point.pose.orientation.z = rot->z;
-                point.pose.orientation.w = rot->w;
+                double my_yaw1 = rot->value;
+
+                point.pose.orientation.x = tf::createQuaternionMsgFromRollPitchYaw(0,0,my_yaw1).x;
+                point.pose.orientation.y = tf::createQuaternionMsgFromRollPitchYaw(0,0,my_yaw1).y;
+                point.pose.orientation.z = tf::createQuaternionMsgFromRollPitchYaw(0,0,my_yaw1).z;
+                point.pose.orientation.w = tf::createQuaternionMsgFromRollPitchYaw(0,0,my_yaw1).w;
 
                 smooth_msg_temp.poses.push_back(point);
 
@@ -350,7 +356,7 @@ void octomapCallback(const octomap_msgs::Octomap::ConstPtr &msg, planner* planne
 void odomCb(const nav_msgs::Odometry::ConstPtr &msg, planner* planner_ptr)
 {
     //std::cout << "test" << std::endl;
-    planner_ptr->setStart(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
+    planner_ptr->setStart(msg->pose.pose.position.x, msg->pose.pose.position.y);
     //msg->pose.pose.orientation.x,msg->pose.pose.orientation.y,msg->pose.pose.orientation.z,msg->pose.pose.orientation.w);
     odom_flag = true;
     if(status_flag)
@@ -381,7 +387,7 @@ void odomCb(const nav_msgs::Odometry::ConstPtr &msg, planner* planner_ptr)
 
 void setGoalCallback(const geometry_msgs::PoseStampedConstPtr& msg, planner* planner_ptr)
 {
-    planner_ptr->setGoal(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
+    planner_ptr->setGoal(msg->pose.position.x, msg->pose.position.y);
     if(odom_flag)
         planner_ptr->plan();
 }
